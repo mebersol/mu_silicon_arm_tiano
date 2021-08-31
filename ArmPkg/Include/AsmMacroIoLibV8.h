@@ -10,8 +10,8 @@
 **/
 
 
-#ifndef __MACRO_IO_LIBV8_H__
-#define __MACRO_IO_LIBV8_H__
+#ifndef ASM_MACRO_IO_LIBV8_H_
+#define ASM_MACRO_IO_LIBV8_H_
 
 // This is gross but GCC doesn't follow the C++ spec and is using a '#' in macro definitions.
 //
@@ -126,4 +126,4 @@
 
 #endif
 
-#endif // __MACRO_IO_LIBV8_H__
+#endif // ASM_MACRO_IO_LIBV8_H_
