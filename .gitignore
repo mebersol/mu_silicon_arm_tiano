@@ -42,3 +42,8 @@ BuildConfig.conf
 /UefiCpuPkg/
 /UefiPayloadPkg/
 /UnitTestFrameworkPkg/
+
+# Ignore dropped EDK2 files.
+/.pytool/Readme.md
+/Maintainers.txt
+/edksetup.bat
