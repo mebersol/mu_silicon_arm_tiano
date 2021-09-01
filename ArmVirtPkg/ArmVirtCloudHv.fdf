@@ -1,8 +1,7 @@
 #
-#  Copyright (c) 2018 - 2021, ARM Limited. All rights reserved.
+#  Copyright (c) 2021, ARM Limited. All rights reserved.
 #
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
-#
 #
 
 ################################################################################
@@ -19,15 +18,22 @@
 #
 ################################################################################
 
-[FD.KVMTOOL_EFI]
-BaseAddress   = 0x00000000|gArmTokenSpaceGuid.PcdFdBaseAddress
-# The size in bytes of the FLASH Device
-Size          = 0x00200000|gArmTokenSpaceGuid.PcdFdSize
+[Defines]
+!if $(FD_SIZE_IN_MB) == 2
+  DEFINE FVMAIN_COMPACT_SIZE  = 0x1ff000
+!endif
+!if $(FD_SIZE_IN_MB) == 3
+  DEFINE FVMAIN_COMPACT_SIZE  = 0x2ff000
+!endif
+
+[FD.CLOUDHV_EFI]
+BaseAddress   = 0x00000000|gArmTokenSpaceGuid.PcdFdBaseAddress  # cloud-hypervisor assigns 0 - 0x8000000 for a BootROM
+Size          = $(FD_SIZE)|gArmTokenSpaceGuid.PcdFdSize         # The size in bytes of the FLASH Device
 ErasePolarity = 1
 
 # This one is tricky, it must be: BlockSize * NumBlocks = Size
 BlockSize     = 0x00001000
-NumBlocks     = 0x200
+NumBlocks     = $(FD_NUM_BLOCKS)
 
 ################################################################################
 #
@@ -46,44 +52,24 @@ NumBlocks     = 0x200
 ################################################################################
 
 #
-# Implement the Linux kernel header layout so that the loader will identify
-# it as something bootable, and execute it with a FDT pointer in x0 or r2.
-# This area will be reused to store a copy of the FDT so round it up to 32 KB.
+# UEFI has trouble dealing with FVs that reside at physical address 0x0.
+# So instead, put a hardcoded 'jump to 0x1000' at offset 0x0, and put the
+# real FV at offset 0x1000
 #
-0x00000000|0x00008000
+0x00000000|0x00001000
 DATA = {
 !if $(ARCH) == AARCH64
-  0x01, 0x00, 0x00, 0x10,                         # code0: adr x1, .
-  0xff, 0x1f, 0x00, 0x14,                         # code1: b 0x8000
-  0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, # text_offset: 512 KB
-  0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, # image_size: 2 MB
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # flags
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # res2
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # res3
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, # res4
-  0x41, 0x52, 0x4d, 0x64,                         # magic: "ARM\x64"
-  0x00, 0x00, 0x00, 0x00                          # res5
+  0x00, 0x04, 0x00, 0x14   # 'b 0x1000' in AArch64 ASM
 !else
-  0x08, 0x10, 0x4f, 0xe2, # adr r1, .
-  0x02, 0x00, 0xa0, 0xe1, # mov r0, r2 (DTB)
-  0x00, 0x00, 0xa0, 0xe1, # nop
-  0x00, 0x00, 0xa0, 0xe1, # nop
-  0x00, 0x00, 0xa0, 0xe1, # nop
-  0x00, 0x00, 0xa0, 0xe1, # nop
-  0x00, 0x00, 0xa0, 0xe1, # nop
-  0x00, 0x00, 0xa0, 0xe1, # nop
-
-  0xf6, 0x1f, 0x00, 0xea, # b 0x8000
-  0x18, 0x28, 0x6f, 0x01, # magic
-  0x00, 0x00, 0x00, 0x00, # start
-  0x00, 0x00, 0x20, 0x00, # image size: 2 MB
-  0x01, 0x02, 0x03, 0x04  # endiannness flag
+  0xfe, 0x03, 0x00, 0xea   # 'b 0x1000' in AArch32 ASM
 !endif
 }
 
-0x00008000|0x001f8000
+0x00001000|$(FVMAIN_COMPACT_SIZE)
 gArmTokenSpaceGuid.PcdFvBaseAddress|gArmTokenSpaceGuid.PcdFvSize
 FV = FVMAIN_COMPACT
+
+!include VarStore.fdf.inc
 
 ################################################################################
 #
@@ -97,7 +83,7 @@ FV = FVMAIN_COMPACT
 ################################################################################
 
 [FV.FvMain]
-FvNameGuid         = 8A91C08E-7D9D-4933-84D6-901D26D0766E
+FvNameGuid         = 2A88A00E-E267-C8BF-0E80-AE1BD504ED90
 BlockSize          = 0x40
 NumBlocks          = 0         # This FV gets compressed so make it just big enough
 FvAlignment        = 16        # FV alignment and FV attributes setting.
@@ -121,7 +107,6 @@ READ_LOCK_STATUS   = TRUE
   INF MdeModulePkg/Universal/PCD/Dxe/Pcd.inf
   INF ArmVirtPkg/VirtioFdtDxe/VirtioFdtDxe.inf
   INF ArmVirtPkg/FdtClientDxe/FdtClientDxe.inf
-  INF ArmVirtPkg/KvmtoolPlatformDxe/KvmtoolPlatformDxe.inf
   INF ArmVirtPkg/HighMemDxe/HighMemDxe.inf
 
   #
@@ -133,13 +118,13 @@ READ_LOCK_STATUS   = TRUE
   INF MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
   INF MdeModulePkg/Universal/FaultTolerantWriteDxe/FaultTolerantWriteDxe.inf
   INF MdeModulePkg/Universal/Variable/RuntimeDxe/VariableRuntimeDxe.inf
-
+!if $(SECURE_BOOT_ENABLE) == TRUE
+  INF SecurityPkg/VariableAuthenticated/SecureBootConfigDxe/SecureBootConfigDxe.inf
+!endif
   INF MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounterRuntimeDxe.inf
   INF MdeModulePkg/Universal/ResetSystemRuntimeDxe/ResetSystemRuntimeDxe.inf
-
-  INF  MdeModulePkg/Universal/Metronome/Metronome.inf
-  INF  PcAtChipsetPkg/PcatRealTimeClockRuntimeDxe/PcatRealTimeClockRuntimeDxe.inf
-
+  INF EmbeddedPkg/RealTimeClockRuntimeDxe/RealTimeClockRuntimeDxe.inf
+  INF EmbeddedPkg/MetronomeDxe/MetronomeDxe.inf
   INF MdeModulePkg/Universal/HiiDatabaseDxe/HiiDatabaseDxe.inf
 
   #
@@ -154,16 +139,21 @@ READ_LOCK_STATUS   = TRUE
   INF ArmPkg/Drivers/ArmGic/ArmGicDxe.inf
   INF ArmPkg/Drivers/TimerDxe/TimerDxe.inf
   INF MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
-  INF ArmPlatformPkg/Drivers/NorFlashDxe/NorFlashDxe.inf
 
   #
-  # FAT filesystem + GPT/MBR partitioning + UDF filesystem
+  # FAT filesystem + GPT/MBR partitioning + UDF filesystem + virtio-fs
   #
   INF MdeModulePkg/Universal/Disk/DiskIoDxe/DiskIoDxe.inf
   INF MdeModulePkg/Universal/Disk/PartitionDxe/PartitionDxe.inf
   INF FatPkg/EnhancedFatDxe/Fat.inf
   INF MdeModulePkg/Universal/Disk/UnicodeCollation/EnglishDxe/EnglishDxe.inf
   INF MdeModulePkg/Universal/Disk/UdfDxe/UdfDxe.inf
+  INF OvmfPkg/VirtioFsDxe/VirtioFsDxe.inf
+
+  #
+  # Status Code Routing
+  #
+  INF MdeModulePkg/Universal/ReportStatusCodeRouter/RuntimeDxe/ReportStatusCodeRouterRuntimeDxe.inf
 
   #
   # Platform Driver
@@ -173,8 +163,13 @@ READ_LOCK_STATUS   = TRUE
   INF OvmfPkg/VirtioScsiDxe/VirtioScsi.inf
   INF OvmfPkg/VirtioRngDxe/VirtioRng.inf
 
+  #
+  # UEFI application (Shell Embedded Boot Loader)
+  #
   INF ShellPkg/Application/Shell/Shell.inf
   INF ShellPkg/DynamicCommand/TftpDynamicCommand/TftpDynamicCommand.inf
+  INF ShellPkg/DynamicCommand/HttpDynamicCommand/HttpDynamicCommand.inf
+  INF OvmfPkg/LinuxInitrdDynamicShellCommand/LinuxInitrdDynamicShellCommand.inf
 
   #
   # Bds
@@ -193,11 +188,27 @@ READ_LOCK_STATUS   = TRUE
   INF MdeModulePkg/Bus/Scsi/ScsiDiskDxe/ScsiDiskDxe.inf
 
   #
+  # ACPI Support
+  #
+  INF ArmVirtPkg/CloudHvPlatformHasAcpiDtDxe/CloudHvHasAcpiDtDxe.inf
+!if $(ARCH) == AARCH64
+  INF MdeModulePkg/Universal/Acpi/AcpiTableDxe/AcpiTableDxe.inf
+  INF MdeModulePkg/Universal/Acpi/BootGraphicsResourceTableDxe/BootGraphicsResourceTableDxe.inf
+  INF ArmVirtPkg/CloudHvAcpiPlatformDxe/CloudHvAcpiPlatformDxe.inf
+
+  #
+  # EBC support
+  #
+  INF MdeModulePkg/Universal/EbcDxe/EbcDxe.inf
+!endif
+
+  #
   # PCI support
   #
   INF ArmPkg/Drivers/ArmPciCpuIo2Dxe/ArmPciCpuIo2Dxe.inf
   INF MdeModulePkg/Bus/Pci/PciHostBridgeDxe/PciHostBridgeDxe.inf
   INF MdeModulePkg/Bus/Pci/PciBusDxe/PciBusDxe.inf
+  INF OvmfPkg/PciHotPlugInitDxe/PciHotPlugInit.inf
   INF OvmfPkg/VirtioPciDeviceDxe/VirtioPciDeviceDxe.inf
   INF OvmfPkg/Virtio10Dxe/Virtio10.inf
 
@@ -229,7 +240,14 @@ READ_STATUS        = TRUE
 READ_LOCK_CAP      = TRUE
 READ_LOCK_STATUS   = TRUE
 
-  INF RuleOverride = SELF_RELOC ArmVirtPkg/PrePi/ArmVirtPrePiUniCoreRelocatable.inf
+  INF ArmPlatformPkg/PrePeiCore/PrePeiCoreUniCore.inf
+  INF MdeModulePkg/Core/Pei/PeiMain.inf
+  INF ArmPlatformPkg/PlatformPei/PlatformPeim.inf
+  INF ArmPlatformPkg/MemoryInitPei/MemoryInitPeim.inf
+  INF ArmPkg/Drivers/CpuPei/CpuPei.inf
+  INF MdeModulePkg/Universal/PCD/Pei/Pcd.inf
+  INF MdeModulePkg/Universal/Variable/Pei/VariablePei.inf
+  INF MdeModulePkg/Core/DxeIplPeim/DxeIpl.inf
 
   FILE FV_IMAGE = 9E21FD93-9C72-4c15-8C4B-E77F1DB2D792 {
     SECTION GUIDED EE4E5898-3914-4259-9D6E-DC7BD79403CF PROCESSING_REQUIRED = TRUE {
